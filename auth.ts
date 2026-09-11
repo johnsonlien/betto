@@ -15,4 +15,10 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   pages: {
     verifyRequest: "/auth/verify-request",
   },
+  callbacks: {
+    session({ session, user }) {
+      session.user.id = user.id;
+      return session;
+    },
+  },
 });

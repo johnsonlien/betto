@@ -21,7 +21,13 @@ Betto ("Better Together") is a collaborative calendar for planning vacations and
 ## Conventions
 
 - **ORM**: Prisma (`@prisma/client` + `prisma` CLI), schema at `prisma/schema.prisma`, targeting the PostgreSQL datasource via `DATABASE_URL`. Use Prisma Migrate (`prisma migrate dev`) for all schema changes — no ad-hoc SQL/schema drift.
-- Auth approach, folder structure, and styling are still undecided — document them here as they're chosen.
+- **Auth**: Auth.js (NextAuth) with the Prisma adapter (`Account`/`Session`/`VerificationToken`/`User` models in `prisma/schema.prisma`). Default sign-in method is email magic link — "making an account" is just entering an email.
+- **Roles**: `CollaboratorRole` enum — `OWNER` / `EDITOR` / `VIEWER` — on `CalendarCollaborator`. Only `EDITOR`/`VIEWER` are used for invites/share links; ownership isn't transferred that way.
+- **Collaborator access model**:
+  - `CalendarInvite` — targeted invite by email, one pending invite per (calendar, email), token-based, expires.
+  - `CalendarShareLink` — generic per-role shareable link, revocable/regenerable (app logic keeps at most one active link per calendar+role).
+  - A `VIEWER` link/invite grants read-only access with **no account required**. An `EDITOR` link/invite requires signing in (creating an account if new) before access is granted. This is the floor: editing a calendar always requires an account; viewing does not.
+- Folder structure and styling are still undecided — document them here as they're chosen.
 - Prefer server components and server actions for data access where Next.js makes that natural; keep client components limited to interactive UI (drag-and-drop, day focus view, map/pin interactions).
 - Keep calendar/event/collaborator data model changes reflected in migrations, not ad-hoc schema drift.
 

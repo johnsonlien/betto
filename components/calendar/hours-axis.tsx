@@ -1,3 +1,5 @@
+import { HOUR_HEIGHT, TOP_ZONE_HEIGHT } from "@/lib/calendar/time-grid";
+
 const HOURS = Array.from({ length: 24 }, (_, h) => h);
 
 function formatHourLabel(hour: number) {
@@ -6,17 +8,17 @@ function formatHourLabel(hour: number) {
   return `${displayHour} ${period}`;
 }
 
-/**
- * A time-of-day reference strip next to a row of day columns. Events aren't
- * positioned by time (they're a simple stacked list per day), so this is a
- * visual reference only — not aligned to where any specific event sits.
- */
+/** Time-of-day labels aligned to each row's hourly grid. */
 export function HoursAxis() {
   return (
-    <div className="flex w-11 shrink-0 flex-col pt-10">
+    <div className="flex w-11 shrink-0 flex-col" style={{ paddingTop: TOP_ZONE_HEIGHT }}>
       {HOURS.map((hour) => (
-        <div key={hour} className="h-6 text-right text-[10px] leading-6 text-neutral-400">
-          {formatHourLabel(hour)}
+        <div
+          key={hour}
+          style={{ height: HOUR_HEIGHT }}
+          className="flex items-start justify-end text-[10px] leading-none text-neutral-400"
+        >
+          <span className="pr-1">{formatHourLabel(hour)}</span>
         </div>
       ))}
     </div>

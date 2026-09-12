@@ -10,12 +10,12 @@ type TxClient = Prisma.TransactionClient;
  */
 export async function moveEventCore(
   tx: TxClient,
-  event: { id: string; calendarId: string; date: Date },
+  event: { id: string; calendarId: string; date: Date | null },
   toDateStr: string,
   toIndex: number
 ) {
   const toDate = parseDateOnly(toDateStr);
-  const fromDateStr = formatDateOnly(event.date);
+  const fromDateStr = event.date ? formatDateOnly(event.date) : null;
   const sameDay = fromDateStr === toDateStr;
 
   if (sameDay) {

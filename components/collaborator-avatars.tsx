@@ -1,4 +1,4 @@
-type Person = { id: string; name: string | null; email: string };
+export type Person = { id: string; name: string | null; email: string };
 
 function initialsFor(person: Person) {
   const name = person.name?.trim();

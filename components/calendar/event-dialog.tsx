@@ -39,15 +39,19 @@ export function EventDialog({
   event,
   canEdit,
   locationOptions,
+  prefill,
   onSaved,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   calendarId: string;
-  date: string;
+  /** null when creating an unscheduled idea-pool event. */
+  date: string | null;
   event: EventItem | null;
   canEdit: boolean;
   locationOptions: LocationOption[];
+  /** Prefills start/end time when creating a new event (e.g. from a grid time-range selection). */
+  prefill?: { startTime: string; endTime: string } | null;
   onSaved: () => void;
 }) {
   const [draft, setDraft] = useState<Draft>(EMPTY_DRAFT);
@@ -76,9 +80,13 @@ export function EventDialog({
             category: event.category ?? "",
             locationId: event.locationId ?? "",
           }
-        : EMPTY_DRAFT
+        : prefill
+          ? { ...EMPTY_DRAFT, startTime: prefill.startTime, endTime: prefill.endTime }
+          : EMPTY_DRAFT
     );
-  }, [open, event]);
+  }, [open, event, prefill]);
+
+  const isPoolItem = date === null;
 
   const isEditing = Boolean(event);
 
@@ -114,8 +122,8 @@ export function EventDialog({
 
         const payload = {
           title: draft.title,
-          startTime: draft.startTime,
-          endTime: draft.endTime,
+          startTime: isPoolItem ? undefined : draft.startTime,
+          endTime: isPoolItem ? undefined : draft.endTime,
           notes: draft.notes,
           category: draft.category || null,
           locationId,
@@ -167,28 +175,34 @@ export function EventDialog({
             />
           </div>
 
-          <div className="flex gap-3">
-            <div className="flex flex-1 flex-col gap-1.5">
-              <Label htmlFor="event-start">Starts</Label>
-              <Input
-                id="event-start"
-                type="time"
-                value={draft.startTime}
-                disabled={!canEdit}
-                onChange={(e) => setDraft((d) => ({ ...d, startTime: e.target.value }))}
-              />
+          {isPoolItem ? (
+            <p className="text-xs text-neutral-400">
+              This is an unscheduled idea — drag it onto a day to give it a date and time.
+            </p>
+          ) : (
+            <div className="flex flex-col gap-3">
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="event-start">Starts</Label>
+                <Input
+                  id="event-start"
+                  type="time"
+                  value={draft.startTime}
+                  disabled={!canEdit}
+                  onChange={(e) => setDraft((d) => ({ ...d, startTime: e.target.value }))}
+                />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="event-end">Ends</Label>
+                <Input
+                  id="event-end"
+                  type="time"
+                  value={draft.endTime}
+                  disabled={!canEdit}
+                  onChange={(e) => setDraft((d) => ({ ...d, endTime: e.target.value }))}
+                />
+              </div>
             </div>
-            <div className="flex flex-1 flex-col gap-1.5">
-              <Label htmlFor="event-end">Ends</Label>
-              <Input
-                id="event-end"
-                type="time"
-                value={draft.endTime}
-                disabled={!canEdit}
-                onChange={(e) => setDraft((d) => ({ ...d, endTime: e.target.value }))}
-              />
-            </div>
-          </div>
+          )}
 
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="event-category">Tag</Label>

@@ -117,7 +117,9 @@ model Event {
   id        String         @id @default(cuid())
   title     String
   notes     String?
-  date      DateTime
+  // null date = an unscheduled "idea pool" event, not yet assigned a day.
+  // Pool events never have a startTime/endTime either.
+  date      DateTime?
   startTime DateTime?
   endTime   DateTime?
   position  Int

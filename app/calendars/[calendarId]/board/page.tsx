@@ -1,10 +1,8 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { getCalendarAccess, canEdit as canEditAccess } from "@/lib/permissions";
 import { formatDateOnly, formatTimeInputValue, addDays, formatDayLabel, startOfWeek } from "@/lib/dates";
 import { CalendarBoard } from "@/components/calendar/calendar-board";
-import { CollaboratorAvatars } from "@/components/collaborator-avatars";
 import type { DayColumnData, EventItem, MapLocation } from "@/components/calendar/types";
 
 const dateRangeFormatter = new Intl.DateTimeFormat("en-US", {
@@ -13,6 +11,28 @@ const dateRangeFormatter = new Intl.DateTimeFormat("en-US", {
   year: "numeric",
   timeZone: "UTC",
 });
+
+function toEventItem(event: {
+  id: string;
+  title: string;
+  notes: string | null;
+  startTime: Date | null;
+  endTime: Date | null;
+  category: EventItem["category"];
+  locationId: string | null;
+  location: { name: string } | null;
+}): EventItem {
+  return {
+    id: event.id,
+    title: event.title,
+    notes: event.notes,
+    startTime: event.startTime ? formatTimeInputValue(event.startTime) : null,
+    endTime: event.endTime ? formatTimeInputValue(event.endTime) : null,
+    category: event.category,
+    locationId: event.locationId,
+    locationName: event.location?.name ?? null,
+  };
+}
 
 export default async function CalendarBoardPage({
   params,
@@ -34,10 +54,15 @@ export default async function CalendarBoardPage({
     );
   }
 
-  const [events, locations, owner, collaborators] = await Promise.all([
+  const [events, poolEventRows, locations, owner, collaborators] = await Promise.all([
     prisma.event.findMany({
       where: { calendarId, date: { gte: calendar.startDate, lte: calendar.endDate } },
       orderBy: [{ date: "asc" }, { position: "asc" }],
+      include: { location: { select: { name: true } } },
+    }),
+    prisma.event.findMany({
+      where: { calendarId, date: null },
+      orderBy: { position: "asc" },
       include: { location: { select: { name: true } } },
     }),
     prisma.location.findMany({
@@ -67,19 +92,13 @@ export default async function CalendarBoardPage({
 
   const eventsByDate: Record<string, EventItem[]> = Object.fromEntries(days.map((d) => [d.date, []]));
   for (const event of events) {
+    if (!event.date) continue;
     const key = formatDateOnly(event.date);
     if (!eventsByDate[key]) eventsByDate[key] = [];
-    eventsByDate[key].push({
-      id: event.id,
-      title: event.title,
-      notes: event.notes,
-      startTime: event.startTime ? formatTimeInputValue(event.startTime) : null,
-      endTime: event.endTime ? formatTimeInputValue(event.endTime) : null,
-      category: event.category,
-      locationId: event.locationId,
-      locationName: event.location?.name ?? null,
-    });
+    eventsByDate[key].push(toEventItem(event));
   }
+
+  const poolEvents = poolEventRows.map(toEventItem);
 
   const locationOptions = locations.map((loc) => ({ id: loc.id, name: loc.name }));
   const mapLocations: MapLocation[] = locations.map((loc) => ({
@@ -87,28 +106,13 @@ export default async function CalendarBoardPage({
     name: loc.name,
     lat: loc.lat,
     lng: loc.lng,
-    eventDates: loc.events.map((e) => formatDateOnly(e.date)),
+    eventDates: loc.events.filter((e) => e.date).map((e) => formatDateOnly(e.date!)),
   }));
 
   const people = owner ? [owner, ...collaborators.map((c) => c.user)] : collaborators.map((c) => c.user);
 
   return (
     <main className="mx-auto flex max-w-none flex-col gap-6 px-6 py-10">
-      <header className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-col gap-1">
-          <Link
-            href={`/calendars/${calendarId}`}
-            className="text-sm text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200"
-          >
-            &larr; {calendar.title}
-          </Link>
-          <h1 className="text-xl font-medium text-neutral-900 dark:text-neutral-100">
-            {dateRangeFormatter.format(calendar.startDate)} – {dateRangeFormatter.format(calendar.endDate)}
-          </h1>
-        </div>
-        <CollaboratorAvatars people={people} />
-      </header>
-
       <CalendarBoard
         calendarId={calendarId}
         days={days}
@@ -117,6 +121,13 @@ export default async function CalendarBoardPage({
         dayHrefBase={`/calendars/${calendarId}/day`}
         locationOptions={locationOptions}
         mapLocations={mapLocations}
+        poolEvents={poolEvents}
+        header={{
+          backHref: `/calendars/${calendarId}`,
+          calendarTitle: calendar.title,
+          dateRangeLabel: `${dateRangeFormatter.format(calendar.startDate)} – ${dateRangeFormatter.format(calendar.endDate)}`,
+          people,
+        }}
       />
     </main>
   );

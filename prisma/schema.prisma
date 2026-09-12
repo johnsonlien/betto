@@ -105,15 +105,24 @@ model CalendarCollaborator {
   @@unique([calendarId, userId])
 }
 
+enum EventCategory {
+  LODGING
+  FOOD
+  ACTIVITY
+  TRANSPORT
+  OTHER
+}
+
 model Event {
-  id        String    @id @default(cuid())
+  id        String         @id @default(cuid())
   title     String
   notes     String?
   date      DateTime
   startTime DateTime?
   endTime   DateTime?
   position  Int
-  createdAt DateTime  @default(now())
+  category  EventCategory?
+  createdAt DateTime       @default(now())
 
   calendarId String
   calendar   Calendar @relation(fields: [calendarId], references: [id], onDelete: Cascade)

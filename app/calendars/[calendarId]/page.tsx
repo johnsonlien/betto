@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { getCalendarAccess, isOwner } from "@/lib/permissions";
@@ -57,6 +58,12 @@ export default async function CalendarPage({
   return (
     <main className="mx-auto flex max-w-2xl flex-col gap-10 px-6 py-12">
       <header className="flex flex-col gap-1">
+        <Link
+          href="/"
+          className="text-sm text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200"
+        >
+          &larr; Your calendars
+        </Link>
         <div className="flex items-center gap-3">
           <h1 className="text-2xl font-medium text-neutral-900 dark:text-neutral-100">{calendar.title}</h1>
           <RoleBadge role={access.role!} />
@@ -68,7 +75,9 @@ export default async function CalendarPage({
           <p className="text-sm text-neutral-400">You&apos;re viewing with a share link, not an account.</p>
         )}
         <div>
-          <Button render={<a href={`/calendars/${calendarId}/board`} />}>Open calendar</Button>
+          <Button nativeButton={false} render={<a href={`/calendars/${calendarId}/board`} />}>
+            Open calendar
+          </Button>
         </div>
       </header>
 

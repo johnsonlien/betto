@@ -1,6 +1,9 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
+/* Imported globally, not inside the map components themselves, since CSS
+   from a next/dynamic({ssr:false}) module isn't reliably injected. */
+@import "maplibre-gl/dist/maplibre-gl.css";
 
 @custom-variant dark (&:is(.dark *));
 

@@ -1,15 +1,10 @@
 "use server";
 
+import type { EventCategory } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { getCalendarAccess, canEdit } from "@/lib/permissions";
 import { parseDateOnly, combineDateAndTime, formatDateOnly } from "@/lib/dates";
 import { moveEventCore } from "@/lib/calendar/move-event";
-
-async function requireEditAccess(calendarId: string) {
-  const access = await getCalendarAccess(calendarId);
-  if (!canEdit(access)) throw new Error("You don't have permission to edit this calendar");
-  return access;
-}
+import { requireEditAccess } from "@/lib/actions/require-edit-access";
 
 async function nextPosition(calendarId: string, date: Date) {
   const last = await prisma.event.findFirst({
@@ -20,10 +15,16 @@ async function nextPosition(calendarId: string, date: Date) {
   return (last?.position ?? -1) + 1;
 }
 
-export async function createEvent(
-  calendarId: string,
-  input: { title: string; date: string; startTime?: string; endTime?: string; notes?: string }
-) {
+type EventInput = {
+  title: string;
+  startTime?: string;
+  endTime?: string;
+  notes?: string;
+  category?: EventCategory | null;
+  locationId?: string | null;
+};
+
+export async function createEvent(calendarId: string, input: EventInput & { date: string }) {
   await requireEditAccess(calendarId);
 
   const title = input.title.trim();
@@ -41,14 +42,13 @@ export async function createEvent(
       notes: input.notes?.trim() || null,
       startTime: input.startTime ? combineDateAndTime(input.date, input.startTime) : null,
       endTime: input.endTime ? combineDateAndTime(input.date, input.endTime) : null,
+      category: input.category || null,
+      locationId: input.locationId || null,
     },
   });
 }
 
-export async function updateEvent(
-  eventId: string,
-  input: { title: string; startTime?: string; endTime?: string; notes?: string }
-) {
+export async function updateEvent(eventId: string, input: EventInput) {
   const event = await prisma.event.findUniqueOrThrow({ where: { id: eventId } });
   await requireEditAccess(event.calendarId);
 
@@ -64,6 +64,8 @@ export async function updateEvent(
       notes: input.notes?.trim() || null,
       startTime: input.startTime ? combineDateAndTime(dateStr, input.startTime) : null,
       endTime: input.endTime ? combineDateAndTime(dateStr, input.endTime) : null,
+      category: input.category || null,
+      locationId: input.locationId || null,
     },
   });
 }

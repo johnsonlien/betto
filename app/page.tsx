@@ -19,7 +19,7 @@ export default async function Home() {
       <main className="flex min-h-screen flex-col items-center justify-center gap-4 p-8 text-center">
         <h1 className="text-3xl font-semibold">Betto</h1>
         <p className="text-neutral-500">Better Together — plan trips as a group.</p>
-        <Button render={<a href={`/api/auth/signin?callbackUrl=${encodeURIComponent("/")}`} />}>
+        <Button nativeButton={false} render={<a href={`/api/auth/signin?callbackUrl=${encodeURIComponent("/")}`} />}>
           Sign in
         </Button>
       </main>
@@ -38,7 +38,9 @@ export default async function Home() {
     <main className="mx-auto flex max-w-2xl flex-col gap-8 px-6 py-12">
       <header className="flex items-center justify-between">
         <h1 className="text-2xl font-medium text-neutral-900 dark:text-neutral-100">Your calendars</h1>
-        <Button render={<a href="/calendars/new" />}>New calendar</Button>
+        <Button nativeButton={false} render={<a href="/calendars/new" />}>
+          New calendar
+        </Button>
       </header>
 
       {calendars.length === 0 ? (

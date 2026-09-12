@@ -28,10 +28,14 @@ export default async function DayViewPage({
 
   const date = parseDateOnly(dateStr);
 
-  const events = await prisma.event.findMany({
-    where: { calendarId, date },
-    orderBy: { position: "asc" },
-  });
+  const [events, locations] = await Promise.all([
+    prisma.event.findMany({
+      where: { calendarId, date },
+      orderBy: { position: "asc" },
+      include: { location: { select: { name: true } } },
+    }),
+    prisma.location.findMany({ where: { calendarId }, select: { id: true, name: true } }),
+  ]);
 
   const day: DayColumnData = {
     date: dateStr,
@@ -46,6 +50,9 @@ export default async function DayViewPage({
       notes: event.notes,
       startTime: event.startTime ? formatTimeInputValue(event.startTime) : null,
       endTime: event.endTime ? formatTimeInputValue(event.endTime) : null,
+      category: event.category,
+      locationId: event.locationId,
+      locationName: event.location?.name ?? null,
     })),
   };
 
@@ -74,7 +81,13 @@ export default async function DayViewPage({
         </div>
       </header>
 
-      <CalendarBoard calendarId={calendarId} days={[day]} eventsByDate={eventsByDate} canEdit={canEditAccess(access)} />
+      <CalendarBoard
+        calendarId={calendarId}
+        days={[day]}
+        eventsByDate={eventsByDate}
+        canEdit={canEditAccess(access)}
+        locationOptions={locations}
+      />
     </main>
   );
 }

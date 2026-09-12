@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
+import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import {
   DndContext,
@@ -19,8 +20,15 @@ import { arrayMove, sortableKeyboardCoordinates } from "@dnd-kit/sortable";
 import { DayColumn } from "./day-column";
 import { EventCard } from "./event-card";
 import { EventDialog } from "./event-dialog";
+import { HoursAxis } from "./hours-axis";
 import { moveEvent } from "@/lib/actions/events";
-import type { DayColumnData, EventItem } from "./types";
+import type { DayColumnData, EventItem, LocationOption, MapLocation } from "./types";
+
+// MapLibre needs the browser and is only used on pages that pass mapLocations —
+// load it lazily so the day view (which never shows the panel) doesn't ship it.
+const LocationsPanel = dynamic(() => import("./locations-panel").then((m) => m.LocationsPanel), {
+  ssr: false,
+});
 
 type Columns = Record<string, EventItem[]>;
 
@@ -35,18 +43,66 @@ export function CalendarBoard({
   eventsByDate,
   canEdit,
   dayHrefBase,
+  locationOptions = [],
+  mapLocations,
 }: {
   calendarId: string;
   days: DayColumnData[];
   eventsByDate: Record<string, EventItem[]>;
   canEdit: boolean;
   dayHrefBase?: string;
+  locationOptions?: LocationOption[];
+  /** When provided, renders a locations map panel filterable by selected day(s). */
+  mapLocations?: MapLocation[];
 }) {
   const router = useRouter();
   const [columns, setColumns] = useState<Columns>(eventsByDate);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [dialogState, setDialogState] = useState<{ date: string; event: EventItem | null } | null>(null);
+  const [selectedDates, setSelectedDates] = useState<Set<string>>(new Set());
+  const [dragAnchor, setDragAnchor] = useState<string | null>(null);
   const [, startTransition] = useTransition();
+
+  function dayIndex(date: string) {
+    return days.findIndex((d) => d.date === date);
+  }
+
+  function handleHeaderPointerDown(date: string) {
+    setDragAnchor(date);
+  }
+
+  function handleHeaderPointerEnter(date: string) {
+    if (!dragAnchor) return;
+    const startIdx = dayIndex(dragAnchor);
+    const endIdx = dayIndex(date);
+    if (startIdx === -1 || endIdx === -1) return;
+    const [lo, hi] = startIdx <= endIdx ? [startIdx, endIdx] : [endIdx, startIdx];
+    setSelectedDates(new Set(days.slice(lo, hi + 1).map((d) => d.date)));
+  }
+
+  function handleHeaderClick(date: string) {
+    if (dayHrefBase) router.push(`${dayHrefBase}/${date}`);
+  }
+
+  useEffect(() => {
+    if (!dragAnchor) return;
+    const clearAnchor = () => setDragAnchor(null);
+    window.addEventListener("pointerup", clearAnchor);
+    return () => window.removeEventListener("pointerup", clearAnchor);
+  }, [dragAnchor]);
+
+  const dayRows = useMemo(() => {
+    const rows: DayColumnData[][] = [];
+    for (let i = 0; i < days.length; i += 7) rows.push(days.slice(i, i + 7));
+    return rows;
+  }, [days]);
+  const isSingleDay = days.length === 1;
+
+  const visibleLocations = useMemo(() => {
+    if (!mapLocations) return undefined;
+    if (selectedDates.size === 0) return mapLocations;
+    return mapLocations.filter((loc) => loc.eventDates.some((d) => selectedDates.has(d)));
+  }, [mapLocations, selectedDates]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
@@ -117,34 +173,49 @@ export function CalendarBoard({
 
   return (
     <>
-      <DndContext
-        sensors={sensors}
-        collisionDetection={closestCorners}
-        onDragStart={handleDragStart}
-        onDragOver={handleDragOver}
-        onDragEnd={handleDragEnd}
-      >
-        <div className="flex gap-4 overflow-x-auto pb-2">
-          {days.map((day) => (
-            <DayColumn
-              key={day.date}
-              day={day}
-              events={columns[day.date] ?? []}
-              canEdit={canEdit}
-              linkHref={dayHrefBase ? `${dayHrefBase}/${day.date}` : undefined}
-              onOpenEvent={(eventId) => {
-                const ev = (columns[day.date] ?? []).find((e) => e.id === eventId) ?? null;
-                setDialogState({ date: day.date, event: ev });
-              }}
-              onAddEvent={() => setDialogState({ date: day.date, event: null })}
-            />
-          ))}
-        </div>
+      <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCorners}
+          onDragStart={handleDragStart}
+          onDragOver={handleDragOver}
+          onDragEnd={handleDragEnd}
+        >
+          <div className="flex min-w-0 flex-1 flex-col gap-4">
+            {dayRows.map((row, rowIndex) => (
+              <div key={rowIndex} className="flex gap-2">
+                {!isSingleDay && <HoursAxis />}
+                <div className="flex min-w-0 flex-1 gap-4 overflow-x-auto pb-2">
+                {row.map((day) => (
+                  <DayColumn
+                    key={day.date}
+                    day={day}
+                    events={columns[day.date] ?? []}
+                    canEdit={canEdit}
+                    selected={selectedDates.has(day.date)}
+                    wide={isSingleDay}
+                    onHeaderClick={handleHeaderClick}
+                    onHeaderPointerDown={handleHeaderPointerDown}
+                    onHeaderPointerEnter={handleHeaderPointerEnter}
+                    onOpenEvent={(eventId) => {
+                      const ev = (columns[day.date] ?? []).find((e) => e.id === eventId) ?? null;
+                      setDialogState({ date: day.date, event: ev });
+                    }}
+                    onAddEvent={() => setDialogState({ date: day.date, event: null })}
+                  />
+                ))}
+                </div>
+              </div>
+            ))}
+          </div>
 
-        <DragOverlay>
-          {activeEvent ? <EventCard event={activeEvent} canEdit={canEdit} onOpen={() => {}} /> : null}
-        </DragOverlay>
-      </DndContext>
+          <DragOverlay>
+            {activeEvent ? <EventCard event={activeEvent} canEdit={canEdit} onOpen={() => {}} /> : null}
+          </DragOverlay>
+        </DndContext>
+
+        {visibleLocations && <LocationsPanel locations={visibleLocations} />}
+      </div>
 
       {dialogState && (
         <EventDialog
@@ -154,6 +225,7 @@ export function CalendarBoard({
           date={dialogState.date}
           event={dialogState.event}
           canEdit={canEdit}
+          locationOptions={locationOptions}
           onSaved={() => router.refresh()}
         />
       )}

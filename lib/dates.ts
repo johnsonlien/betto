@@ -43,6 +43,10 @@ export function addDays(date: Date, days: number): Date {
   return result;
 }
 
+export function startOfWeek(date: Date): Date {
+  return addDays(date, -date.getUTCDay());
+}
+
 export function formatDayLabel(date: Date): string {
   return new Intl.DateTimeFormat("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" }).format(
     date

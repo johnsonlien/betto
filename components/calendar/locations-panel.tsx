@@ -7,7 +7,7 @@ import type { MapLocation } from "./types";
 export function LocationsPanel({ locations }: { locations: MapLocation[] }) {
   if (locations.length === 0) {
     return (
-      <aside className="flex h-64 w-full shrink-0 items-center justify-center rounded-md border border-neutral-200 p-4 text-center text-sm text-neutral-400 dark:border-neutral-800 lg:sticky lg:top-6 lg:h-[540px] lg:w-72">
+      <aside className="flex h-80 w-full shrink-0 items-center justify-center rounded-md border border-neutral-200 p-4 text-center text-sm text-neutral-400 dark:border-neutral-800 lg:sticky lg:top-6 lg:h-[calc(100vh-8rem)] lg:w-[28rem]">
         No pinned locations yet.
       </aside>
     );
@@ -17,7 +17,7 @@ export function LocationsPanel({ locations }: { locations: MapLocation[] }) {
   const avgLng = locations.reduce((sum, l) => sum + l.lng, 0) / locations.length;
 
   return (
-    <aside className="h-64 w-full shrink-0 overflow-hidden rounded-md border border-neutral-200 dark:border-neutral-800 lg:sticky lg:top-6 lg:h-[540px] lg:w-72">
+    <aside className="h-80 w-full shrink-0 overflow-hidden rounded-md border border-neutral-200 dark:border-neutral-800 lg:sticky lg:top-6 lg:h-[calc(100vh-8rem)] lg:w-[28rem]">
       <Map
         initialViewState={{ longitude: avgLng, latitude: avgLat, zoom: 10 }}
         mapStyle={MAP_STYLE}

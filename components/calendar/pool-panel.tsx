@@ -24,7 +24,7 @@ export function PoolPanel({
   const { setNodeRef } = useDroppable({ id: "pool" });
 
   return (
-    <div className="rounded-md border border-dashed border-neutral-300 p-3 dark:border-neutral-700">
+    <div className="sticky top-0 z-30 rounded-md border border-dashed border-neutral-300 bg-white p-3 shadow-sm dark:border-neutral-700 dark:bg-neutral-950">
       <div className="mb-2 flex items-center justify-between gap-2">
         <p className="text-xs text-neutral-500">Ideas not scheduled yet — drag one onto a day.</p>
         {canEdit && (

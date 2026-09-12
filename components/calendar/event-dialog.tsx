@@ -211,7 +211,7 @@ export function EventDialog({
               value={draft.category}
               disabled={!canEdit}
               onChange={(e) => setDraft((d) => ({ ...d, category: e.target.value as EventCategory | "" }))}
-              className="h-9 rounded-md border border-neutral-200 bg-transparent px-3 text-sm dark:border-neutral-800"
+              className="h-9 w-full min-w-0 overflow-hidden text-ellipsis whitespace-nowrap rounded-md border border-neutral-200 bg-transparent px-3 text-sm dark:border-neutral-800"
             >
               <option value="">No tag</option>
               {CATEGORY_OPTIONS.map((c) => (
@@ -229,7 +229,7 @@ export function EventDialog({
               value={draft.locationId}
               disabled={!canEdit}
               onChange={(e) => setDraft((d) => ({ ...d, locationId: e.target.value }))}
-              className="h-9 rounded-md border border-neutral-200 bg-transparent px-3 text-sm dark:border-neutral-800"
+              className="h-9 w-full min-w-0 overflow-hidden text-ellipsis whitespace-nowrap rounded-md border border-neutral-200 bg-transparent px-3 text-sm dark:border-neutral-800"
             >
               <option value="">No location</option>
               {locationOptions.map((loc) => (

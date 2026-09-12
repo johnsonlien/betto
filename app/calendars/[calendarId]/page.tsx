@@ -67,6 +67,9 @@ export default async function CalendarPage({
         {access.viaLink && (
           <p className="text-sm text-neutral-400">You&apos;re viewing with a share link, not an account.</p>
         )}
+        <div>
+          <Button render={<a href={`/calendars/${calendarId}/board`} />}>Open calendar</Button>
+        </div>
       </header>
 
       {owner && (

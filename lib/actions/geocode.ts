@@ -10,6 +10,7 @@ export type GeocodeResult = {
   label: string;
   lat: number;
   lng: number;
+  city: string | null;
 };
 
 export async function searchAddress(query: string): Promise<GeocodeResult[]> {
@@ -20,16 +21,23 @@ export async function searchAddress(query: string): Promise<GeocodeResult[]> {
   url.searchParams.set("q", q);
   url.searchParams.set("format", "jsonv2");
   url.searchParams.set("limit", "5");
+  url.searchParams.set("addressdetails", "1");
 
   const res = await fetch(url, {
     headers: { "User-Agent": "Betto (collaborative trip calendar)" },
   });
   if (!res.ok) return [];
 
-  const results = (await res.json()) as { display_name: string; lat: string; lon: string }[];
+  const results = (await res.json()) as {
+    display_name: string;
+    lat: string;
+    lon: string;
+    address?: { city?: string; town?: string; village?: string; municipality?: string };
+  }[];
   return results.map((r) => ({
     label: r.display_name,
     lat: Number.parseFloat(r.lat),
     lng: Number.parseFloat(r.lon),
+    city: r.address?.city ?? r.address?.town ?? r.address?.village ?? r.address?.municipality ?? null,
   }));
 }

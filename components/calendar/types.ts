@@ -9,6 +9,9 @@ export type EventItem = {
   category: EventCategory | null;
   locationId: string | null;
   locationName: string | null;
+  city: string | null;
+  cost: string | null; // decimal string, e.g. "42.50"
+  reservationUrl: string | null;
 };
 
 export type DayColumnData = {

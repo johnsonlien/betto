@@ -17,6 +17,9 @@ import {
   type DragStartEvent,
 } from "@dnd-kit/core";
 import { sortableKeyboardCoordinates } from "@dnd-kit/sortable";
+import { CategoryColorsDialog } from "./category-colors-dialog";
+import { CategoryColorsProvider } from "./category-colors-context";
+import { ClearEventsButton } from "./clear-events-button";
 import { DayColumn } from "./day-column";
 import { EventCard } from "./event-card";
 import { EventDialog } from "./event-dialog";
@@ -24,9 +27,12 @@ import { HoursAxis } from "./hours-axis";
 import { MonthView } from "./month-view";
 import { PoolPanel } from "./pool-panel";
 import { Button } from "@/components/ui/button";
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { CollaboratorAvatars, type Person } from "@/components/collaborator-avatars";
-import { moveEvent, moveToGridSlot, moveToPool } from "@/lib/actions/events";
+import { deleteAllEvents, moveEvent, moveToGridSlot, moveToPool } from "@/lib/actions/events";
+import { optimizeRoutes } from "@/lib/actions/routing";
 import { HOUR_HEIGHT, timeToMinutes, minutesToTimeValue, snapMinutes } from "@/lib/calendar/time-grid";
+import { formatTotalCost, sumCosts } from "@/lib/calendar/cost";
 import {
   addMonths,
   formatDateOnly,
@@ -36,13 +42,23 @@ import {
   parseDateOnly,
   startOfMonth,
 } from "@/lib/dates";
-import type { DayColumnData, EventItem, LocationOption, MapLocation } from "./types";
+import type { DayColumnData, EventCategory, EventItem, LocationOption, MapLocation } from "./types";
 
 // MapLibre needs the browser and is only used on pages that pass mapLocations —
 // load it lazily so the day view (which never shows the panel) doesn't ship it.
 const LocationsPanel = dynamic(() => import("./locations-panel").then((m) => m.LocationsPanel), {
   ssr: false,
 });
+
+type RouteDayStops = { date: string; points: { lat: number; lng: number }[] };
+type RouteScope = "day" | "week" | "month" | "calendar";
+
+const ROUTE_SCOPE_OPTIONS: { key: RouteScope; label: string }[] = [
+  { key: "day", label: "Day" },
+  { key: "week", label: "Week" },
+  { key: "month", label: "Month" },
+  { key: "calendar", label: "Whole calendar" },
+];
 
 type Columns = Record<string, EventItem[]>;
 
@@ -108,6 +124,7 @@ export function CalendarBoard({
   locationOptions = [],
   mapLocations,
   poolEvents: initialPoolEvents = [],
+  categoryColors,
   header,
 }: {
   calendarId: string;
@@ -120,6 +137,8 @@ export function CalendarBoard({
   mapLocations?: MapLocation[];
   /** Unscheduled "idea pool" events. Only meaningful with `header` (the board view). */
   poolEvents?: EventItem[];
+  /** Resolved per-tag colors (custom overrides merged over the built-in defaults). */
+  categoryColors: Record<EventCategory, string>;
   /** Renders a header row (title, date range, collaborators, idea-pool toggle) above the board. */
   header?: BoardHeader;
 }) {
@@ -135,9 +154,21 @@ export function CalendarBoard({
   const [selectedDates, setSelectedDates] = useState<Set<string>>(new Set());
   const [dragAnchor, setDragAnchor] = useState<string | null>(null);
   const [showPool, setShowPool] = useState(false);
+  const [showRoutes, setShowRoutes] = useState(false);
+  const [routeScope, setRouteScope] = useState<RouteScope>("day");
+  const [isOptimizing, setIsOptimizing] = useState(false);
   const [, startTransition] = useTransition();
 
   const poolEvents = columns[POOL_KEY] ?? [];
+  const totalEventCount = Object.values(columns).reduce((sum, list) => sum + list.length, 0);
+
+  function handleClearAllEvents() {
+    setColumns((prev) => Object.fromEntries(Object.keys(prev).map((key) => [key, []])));
+    startTransition(async () => {
+      await deleteAllEvents(calendarId);
+      router.refresh();
+    });
+  }
 
   function openDialog(date: string | null, event: EventItem | null, prefill?: { startTime: string; endTime: string }) {
     setDialogState({ date, event, prefill });
@@ -157,6 +188,12 @@ export function CalendarBoard({
       ...prev,
       [key]: (prev[key] ?? []).map((e) => (e.id === tempId ? { ...e, id: realId } : e)),
     }));
+  }
+
+  /** Removes an event from the board immediately, before its delete write to Postgres has even started. */
+  function handleOptimisticDelete(targetDate: string | null, eventId: string) {
+    const key = targetDate ?? POOL_KEY;
+    setColumns((prev) => ({ ...prev, [key]: (prev[key] ?? []).filter((e) => e.id !== eventId) }));
   }
 
   function dayIndex(date: string) {
@@ -232,6 +269,109 @@ export function CalendarBoard({
     if (selectedDates.size === 0) return mapLocations;
     return mapLocations.filter((loc) => loc.eventDates.some((d) => selectedDates.has(d)));
   }, [mapLocations, selectedDates]);
+
+  const locationById = useMemo(() => new Map((mapLocations ?? []).map((l) => [l.id, l])), [mapLocations]);
+
+  // Per-day ordered stops (by start time) for drawing a road route through
+  // that day's timed, located events — scoped to whichever days are
+  // currently selected/visible, same as the pins themselves.
+  const routeStops: RouteDayStops[] | undefined = useMemo(() => {
+    if (!mapLocations) return undefined;
+    const relevantDays = selectedDates.size > 0 ? days.filter((d) => selectedDates.has(d.date)) : days;
+    const result: RouteDayStops[] = [];
+    for (const day of relevantDays) {
+      const points = (columns[day.date] ?? [])
+        .filter((e) => e.startTime && e.locationId)
+        .sort((a, b) => a.startTime!.localeCompare(b.startTime!))
+        .map((e) => locationById.get(e.locationId!))
+        .filter((l): l is MapLocation => Boolean(l))
+        .map((l) => ({ lat: l.lat, lng: l.lng }));
+      if (points.length >= 2) result.push({ date: day.date, points });
+    }
+    return result;
+  }, [mapLocations, days, columns, selectedDates, locationById]);
+
+  function datesForRouteScope(scope: RouteScope): string[] {
+    if (scope === "day") return activeDay ? [activeDay.date] : [];
+    if (scope === "week") return (activeWeek ?? []).map((d) => d.date);
+    if (scope === "month") {
+      const monthPrefix = formatDateOnly(monthCursor).slice(0, 7);
+      return days.filter((d) => d.date.startsWith(monthPrefix)).map((d) => d.date);
+    }
+    return days.filter((d) => d.inRange).map((d) => d.date);
+  }
+
+  async function handleOptimize() {
+    const dateStrs = datesForRouteScope(routeScope);
+    if (dateStrs.length === 0) return;
+    setIsOptimizing(true);
+    try {
+      const results = await optimizeRoutes(calendarId, dateStrs);
+      setColumns((prev) => {
+        const next = { ...prev };
+        for (const day of results) {
+          const updatesById = new Map(day.events.map((e) => [e.id, e]));
+          next[day.date] = (next[day.date] ?? []).map((ev) => {
+            const update = updatesById.get(ev.id);
+            return update ? { ...ev, startTime: update.startTime, endTime: update.endTime } : ev;
+          });
+        }
+        return next;
+      });
+      router.refresh();
+    } finally {
+      setIsOptimizing(false);
+    }
+  }
+
+  // Events scoped to whatever's currently visible — a single day, the
+  // visible week, the visible month, or (for the board's full-trip view)
+  // every scheduled day. The unscheduled idea pool is never included, since
+  // it belongs to no day/week/month. Drives both the cost total and the
+  // city summary below.
+  const eventsInScope = useMemo(() => {
+    const datedEntries = Object.entries(columns).filter(([key]) => key !== POOL_KEY);
+    if (view === "day") return activeDay ? (columns[activeDay.date] ?? []) : [];
+    if (view === "week") return (activeWeek ?? []).flatMap((day) => columns[day.date] ?? []);
+    if (view === "month") {
+      const monthPrefix = formatDateOnly(monthCursor).slice(0, 7);
+      return datedEntries.filter(([date]) => date.startsWith(monthPrefix)).flatMap(([, events]) => events);
+    }
+    return datedEntries.flatMap(([, events]) => events);
+  }, [columns, view, activeDay, activeWeek, monthCursor]);
+
+  const visibleTotalCost = useMemo(() => sumCosts(eventsInScope), [eventsInScope]);
+
+  const visibleCities = useMemo(() => {
+    const cities = new Set(eventsInScope.map((e) => e.city).filter((c): c is string => Boolean(c)));
+    return Array.from(cities).sort();
+  }, [eventsInScope]);
+
+  const dayRowsContent = visibleDayRows.map((row, rowIndex) => (
+    <div key={rowIndex} className="flex gap-2">
+      {!isSingleDay && <HoursAxis />}
+      <div className="flex min-w-0 flex-1 gap-4 overflow-x-auto pb-2">
+        {row.map((day) => (
+          <DayColumn
+            key={day.date}
+            day={day}
+            events={columns[day.date] ?? []}
+            canEdit={canEdit}
+            selected={selectedDates.has(day.date)}
+            wide={isSingleDay || view === "day"}
+            onHeaderClick={handleHeaderClick}
+            onHeaderPointerDown={handleHeaderPointerDown}
+            onHeaderPointerEnter={handleHeaderPointerEnter}
+            onOpenEvent={(eventId) => {
+              const ev = (columns[day.date] ?? []).find((e) => e.id === eventId) ?? null;
+              openDialog(day.date, ev);
+            }}
+            onCreateInRange={(startTime, endTime) => openDialog(day.date, null, { startTime, endTime })}
+          />
+        ))}
+      </div>
+    </div>
+  ));
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
@@ -340,6 +480,7 @@ export function CalendarBoard({
   }
 
   return (
+    <CategoryColorsProvider colors={categoryColors}>
     <div className="flex flex-col gap-6">
       {header && (
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -358,6 +499,10 @@ export function CalendarBoard({
                 {showPool ? "Hide" : "Show"} idea pool{poolEvents.length > 0 ? ` (${poolEvents.length})` : ""}
               </Button>
             )}
+            {canEdit && (
+              <CategoryColorsDialog calendarId={calendarId} colors={categoryColors} onSaved={() => router.refresh()} />
+            )}
+            {canEdit && <ClearEventsButton eventCount={totalEventCount} onConfirm={handleClearAllEvents} />}
             {header.shareDialog}
             <CollaboratorAvatars people={header.people} />
           </div>
@@ -383,70 +528,113 @@ export function CalendarBoard({
             ))}
           </div>
 
-          {view === "day" && activeDay && (
-            <div className="flex items-center gap-2 text-sm">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={dayCursorIndex === 0}
-                onClick={() => setDayCursorIndex((i) => Math.max(0, i - 1))}
-              >
-                Previous
-              </Button>
-              <span className="text-neutral-500">{formatFullDateLabel(parseDateOnly(activeDay.date))}</span>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={dayCursorIndex >= days.length - 1}
-                onClick={() => setDayCursorIndex((i) => Math.min(days.length - 1, i + 1))}
-              >
-                Next
-              </Button>
-            </div>
-          )}
+          <div className="flex items-center gap-3 text-sm">
+            {view === "day" && activeDay && (
+              <>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={dayCursorIndex === 0}
+                  onClick={() => setDayCursorIndex((i) => Math.max(0, i - 1))}
+                >
+                  Previous
+                </Button>
+                <span className="text-neutral-500">{formatFullDateLabel(parseDateOnly(activeDay.date))}</span>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={dayCursorIndex >= days.length - 1}
+                  onClick={() => setDayCursorIndex((i) => Math.min(days.length - 1, i + 1))}
+                >
+                  Next
+                </Button>
+              </>
+            )}
 
-          {view === "week" && activeWeek && dayRows.length > 1 && (
-            <div className="flex items-center gap-2 text-sm">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={weekIndex === 0}
-                onClick={() => setWeekIndex((i) => Math.max(0, i - 1))}
-              >
-                Previous
-              </Button>
-              <span className="text-neutral-500">
-                {formatDayRangeLabel(
-                  parseDateOnly(activeWeek[0].date),
-                  parseDateOnly(activeWeek[activeWeek.length - 1].date)
-                )}
+            {view === "week" && activeWeek && dayRows.length > 1 && (
+              <>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={weekIndex === 0}
+                  onClick={() => setWeekIndex((i) => Math.max(0, i - 1))}
+                >
+                  Previous
+                </Button>
+                <span className="text-neutral-500">
+                  {formatDayRangeLabel(
+                    parseDateOnly(activeWeek[0].date),
+                    parseDateOnly(activeWeek[activeWeek.length - 1].date)
+                  )}
+                </span>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={weekIndex >= dayRows.length - 1}
+                  onClick={() => setWeekIndex((i) => Math.min(dayRows.length - 1, i + 1))}
+                >
+                  Next
+                </Button>
+              </>
+            )}
+
+            {view === "month" && (
+              <>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setMonthCursor((m) => addMonths(m, -1))}
+                >
+                  Previous
+                </Button>
+                <span className="text-neutral-500">{formatMonthLabel(monthCursor)}</span>
+                <Button type="button" variant="outline" size="sm" onClick={() => setMonthCursor((m) => addMonths(m, 1))}>
+                  Next
+                </Button>
+              </>
+            )}
+
+            {visibleTotalCost > 0 && (
+              <span className="text-neutral-400">
+                {view === "board" ? "Trip total" : "Total"}: {formatTotalCost(visibleTotalCost)}
               </span>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={weekIndex >= dayRows.length - 1}
-                onClick={() => setWeekIndex((i) => Math.min(dayRows.length - 1, i + 1))}
-              >
-                Next
-              </Button>
-            </div>
-          )}
+            )}
 
-          {view === "month" && (
-            <div className="flex items-center gap-2 text-sm">
-              <Button type="button" variant="outline" size="sm" onClick={() => setMonthCursor((m) => addMonths(m, -1))}>
-                Previous
-              </Button>
-              <span className="text-neutral-500">{formatMonthLabel(monthCursor)}</span>
-              <Button type="button" variant="outline" size="sm" onClick={() => setMonthCursor((m) => addMonths(m, 1))}>
-                Next
-              </Button>
-            </div>
-          )}
+            {visibleCities.length > 0 && view !== "board" && (
+              <span className="truncate text-neutral-400">Cities: {visibleCities.join(", ")}</span>
+            )}
+
+            {mapLocations && (
+              <>
+                <Button type="button" variant="outline" size="sm" onClick={() => setShowRoutes((s) => !s)}>
+                  {showRoutes ? "Hide" : "Show"} routes
+                </Button>
+                {canEdit && (
+                  <>
+                    <select
+                      value={routeScope}
+                      onChange={(e) => setRouteScope(e.target.value as RouteScope)}
+                      className="h-7 rounded-md border border-neutral-200 bg-transparent px-2 text-xs dark:border-neutral-800"
+                    >
+                      {ROUTE_SCOPE_OPTIONS.map((o) => (
+                        <option key={o.key} value={o.key}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                    <Button type="button" variant="outline" size="sm" onClick={handleOptimize} disabled={isOptimizing}>
+                      {isOptimizing ? "Optimizing…" : "Optimize route"}
+                    </Button>
+                  </>
+                )}
+              </>
+            )}
+          </div>
         </div>
       )}
 
@@ -488,37 +676,29 @@ export function CalendarBoard({
               onDayClick={handleHeaderClick}
               onAddEvent={(date) => openDialog(date, null)}
             />
+          ) : view === "week" && visibleLocations ? (
+            // Week view pairs the days with the map as two resizable panes
+            // that together fill the available height, instead of the map
+            // being a fixed-width sidebar — days get more room by default.
+            <ResizablePanelGroup
+              orientation="horizontal"
+              className="h-[calc(100vh-14rem)] min-w-0 flex-1"
+            >
+              <ResizablePanel defaultSize="68" minSize="30" className="flex flex-col gap-4 overflow-y-auto pr-1">
+                {dayRowsContent}
+              </ResizablePanel>
+              <ResizableHandle withHandle />
+              <ResizablePanel defaultSize="32" minSize="15" className="overflow-hidden">
+                <LocationsPanel locations={visibleLocations} routeStops={routeStops} showRoutes={showRoutes} fill />
+              </ResizablePanel>
+            </ResizablePanelGroup>
           ) : (
-            <div className="flex min-w-0 flex-1 flex-col gap-4">
-              {visibleDayRows.map((row, rowIndex) => (
-                <div key={rowIndex} className="flex gap-2">
-                  {!isSingleDay && <HoursAxis />}
-                  <div className="flex min-w-0 flex-1 gap-4 overflow-x-auto pb-2">
-                    {row.map((day) => (
-                      <DayColumn
-                        key={day.date}
-                        day={day}
-                        events={columns[day.date] ?? []}
-                        canEdit={canEdit}
-                        selected={selectedDates.has(day.date)}
-                        wide={isSingleDay || view === "day"}
-                        onHeaderClick={handleHeaderClick}
-                        onHeaderPointerDown={handleHeaderPointerDown}
-                        onHeaderPointerEnter={handleHeaderPointerEnter}
-                        onOpenEvent={(eventId) => {
-                          const ev = (columns[day.date] ?? []).find((e) => e.id === eventId) ?? null;
-                          openDialog(day.date, ev);
-                        }}
-                        onCreateInRange={(startTime, endTime) => openDialog(day.date, null, { startTime, endTime })}
-                      />
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
+            <div className="flex min-w-0 flex-1 flex-col gap-4">{dayRowsContent}</div>
           )}
 
-          {visibleLocations && <LocationsPanel locations={visibleLocations} />}
+          {view !== "week" && visibleLocations && (
+            <LocationsPanel locations={visibleLocations} routeStops={routeStops} showRoutes={showRoutes} />
+          )}
         </div>
 
         <DragOverlay>
@@ -537,8 +717,10 @@ export function CalendarBoard({
         prefill={dialogState.prefill}
         onOptimisticCreate={handleOptimisticCreate}
         onCreateSettled={handleCreateSettled}
+        onOptimisticDelete={handleOptimisticDelete}
         onSaved={() => router.refresh()}
       />
     </div>
+    </CategoryColorsProvider>
   );
 }

@@ -5,7 +5,7 @@ import { requireEditAccess } from "@/lib/actions/require-edit-access";
 
 export async function createLocation(
   calendarId: string,
-  input: { name: string; lat: number; lng: number; address?: string }
+  input: { name: string; lat: number; lng: number; address?: string; city?: string | null }
 ) {
   await requireEditAccess(calendarId);
 
@@ -20,6 +20,7 @@ export async function createLocation(
       lat: input.lat,
       lng: input.lng,
       address: input.address?.trim() || null,
+      city: input.city?.trim() || null,
     },
   });
 }

@@ -4,7 +4,8 @@ import { prisma } from "@/lib/prisma";
 import { getCalendarAccess, canEdit as canEditAccess } from "@/lib/permissions";
 import { parseDateOnly, formatDateOnly, formatTimeInputValue, addDays, formatFullDateLabel } from "@/lib/dates";
 import { CalendarBoard } from "@/components/calendar/calendar-board";
-import type { DayColumnData, EventItem } from "@/components/calendar/types";
+import { resolveCategoryColors } from "@/components/calendar/category";
+import type { DayColumnData, EventCategory, EventItem } from "@/components/calendar/types";
 
 export default async function DayViewPage({
   params,
@@ -32,7 +33,7 @@ export default async function DayViewPage({
     prisma.event.findMany({
       where: { calendarId, date },
       orderBy: { position: "asc" },
-      include: { location: { select: { name: true } } },
+      include: { location: { select: { name: true, city: true } } },
     }),
     prisma.location.findMany({ where: { calendarId }, select: { id: true, name: true } }),
   ]);
@@ -53,6 +54,9 @@ export default async function DayViewPage({
       category: event.category,
       locationId: event.locationId,
       locationName: event.location?.name ?? null,
+      city: event.location?.city ?? null,
+      cost: event.cost?.toString() ?? null,
+      reservationUrl: event.reservationUrl,
     })),
   };
 
@@ -87,6 +91,7 @@ export default async function DayViewPage({
         eventsByDate={eventsByDate}
         canEdit={canEditAccess(access)}
         locationOptions={locations}
+        categoryColors={resolveCategoryColors(calendar.categoryColors as Partial<Record<EventCategory, string>> | null)}
       />
     </main>
   );

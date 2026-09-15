@@ -79,7 +79,12 @@ model Calendar {
   title     String
   startDate DateTime
   endDate   DateTime
-  createdAt DateTime @default(now())
+  // Per-category hex color overrides, e.g. {"FOOD": "#f97316"}; categories
+  // not present fall back to the built-in default palette
+  // (components/calendar/category.ts). Shared by everyone viewing the
+  // calendar, not per-viewer.
+  categoryColors Json?
+  createdAt      DateTime @default(now())
 
   ownerId String
   owner   User   @relation("CalendarOwner", fields: [ownerId], references: [id])
@@ -124,6 +129,12 @@ model Event {
   endTime   DateTime?
   position  Int
   category  EventCategory?
+  // Optional cost for the event (e.g. a reservation price); no currency
+  // field yet — assumed to be the trip's single implied currency.
+  cost      Decimal?       @db.Decimal(10, 2)
+  // Optional link to a reservation/booking confirmation (hotel, restaurant,
+  // flight, etc.) — a bare URL, not a structured reservation record.
+  reservationUrl String?
   createdAt DateTime       @default(now())
 
   calendarId String
@@ -178,6 +189,11 @@ model Location {
   id        String   @id @default(cuid())
   name      String
   address   String?
+  // Best-effort city extracted from the geocoder at pin-creation time (used
+  // to aggregate "which cities today's/this week's/this month's events are
+  // in"); null for locations created before this existed or without a
+  // resolvable city.
+  city      String?
   lat       Float
   lng       Float
   createdAt DateTime @default(now())

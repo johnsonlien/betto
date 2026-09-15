@@ -4,8 +4,9 @@ import { getCalendarAccess, canEdit as canEditAccess, isOwner as isOwnerAccess }
 import { formatDateOnly, formatTimeInputValue, addDays, formatDayLabel, startOfWeek } from "@/lib/dates";
 import { appUrl } from "@/lib/url";
 import { CalendarBoard } from "@/components/calendar/calendar-board";
+import { resolveCategoryColors } from "@/components/calendar/category";
 import { ShareDialog, type SharePendingInvite } from "@/components/calendar/share-dialog";
-import type { DayColumnData, EventItem, MapLocation } from "@/components/calendar/types";
+import type { DayColumnData, EventCategory, EventItem, MapLocation } from "@/components/calendar/types";
 
 const dateRangeFormatter = new Intl.DateTimeFormat("en-US", {
   month: "long",
@@ -22,7 +23,9 @@ function toEventItem(event: {
   endTime: Date | null;
   category: EventItem["category"];
   locationId: string | null;
-  location: { name: string } | null;
+  location: { name: string; city: string | null } | null;
+  cost: { toString(): string } | null;
+  reservationUrl: string | null;
 }): EventItem {
   return {
     id: event.id,
@@ -33,6 +36,9 @@ function toEventItem(event: {
     category: event.category,
     locationId: event.locationId,
     locationName: event.location?.name ?? null,
+    city: event.location?.city ?? null,
+    cost: event.cost?.toString() ?? null,
+    reservationUrl: event.reservationUrl,
   };
 }
 
@@ -62,12 +68,12 @@ export default async function CalendarBoardPage({
     prisma.event.findMany({
       where: { calendarId, date: { gte: calendar.startDate, lte: calendar.endDate } },
       orderBy: [{ date: "asc" }, { position: "asc" }],
-      include: { location: { select: { name: true } } },
+      include: { location: { select: { name: true, city: true } } },
     }),
     prisma.event.findMany({
       where: { calendarId, date: null },
       orderBy: { position: "asc" },
-      include: { location: { select: { name: true } } },
+      include: { location: { select: { name: true, city: true } } },
     }),
     prisma.location.findMany({
       where: { calendarId },
@@ -145,6 +151,7 @@ export default async function CalendarBoardPage({
         locationOptions={locationOptions}
         mapLocations={mapLocations}
         poolEvents={poolEvents}
+        categoryColors={resolveCategoryColors(calendar.categoryColors as Partial<Record<EventCategory, string>> | null)}
         header={{
           backHref: "/",
           calendarTitle: calendar.title,

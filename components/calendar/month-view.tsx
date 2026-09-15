@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { addDays, formatDateOnly, formatTimeLabelFromValue, startOfMonth, startOfWeek } from "@/lib/dates";
-import { CATEGORY_DOT_CLASSES } from "./category";
+import { useCategoryColors } from "./category-colors-context";
 import type { EventItem } from "./types";
 
 const WEEKDAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -42,6 +42,7 @@ export function MonthView({
   // "today" badge only appears once the client has settled on a value itself.
   const [todayStr, setTodayStr] = useState<string | null>(null);
   useEffect(() => setTodayStr(formatDateOnly(new Date())), []);
+  const categoryColors = useCategoryColors();
 
   const cells = useMemo(() => {
     const monthStart = startOfMonth(month);
@@ -83,28 +84,30 @@ export function MonthView({
           return (
             <div
               key={dateStr}
-              className={`group flex min-h-[104px] flex-col gap-1 rounded-md border border-neutral-200 p-1.5 dark:border-neutral-800 ${
+              onClick={() => onDayClick(dateStr)}
+              className={`group flex min-h-[104px] cursor-pointer flex-col gap-1 rounded-md border border-neutral-200 p-1.5 hover:border-neutral-300 dark:border-neutral-800 dark:hover:border-neutral-700 ${
                 inMonth ? "bg-white dark:bg-neutral-950" : "bg-neutral-50 dark:bg-neutral-900/40"
               } ${!inRange ? "opacity-40" : ""}`}
             >
               <div className="flex items-center justify-between">
-                <button
-                  type="button"
-                  onClick={() => onDayClick(dateStr)}
-                  className={`flex h-5 w-5 items-center justify-center rounded-full text-xs hover:underline ${
+                <span
+                  className={`flex h-5 w-5 items-center justify-center rounded-full text-xs ${
                     isToday
-                      ? "bg-teal-600 font-medium text-white hover:no-underline"
+                      ? "bg-teal-600 font-medium text-white"
                       : inMonth
                         ? "text-neutral-700 dark:text-neutral-300"
                         : "text-neutral-300 dark:text-neutral-700"
                   }`}
                 >
                   {dayOfMonth}
-                </button>
+                </span>
                 {canEdit && inRange && (
                   <button
                     type="button"
-                    onClick={() => onAddEvent(dateStr)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onAddEvent(dateStr);
+                    }}
                     className="opacity-0 text-xs leading-none text-neutral-400 hover:text-neutral-700 focus:opacity-100 group-hover:opacity-100 dark:hover:text-neutral-200"
                     aria-label="Add event"
                   >
@@ -114,25 +117,27 @@ export function MonthView({
               </div>
 
               <div className="flex flex-col gap-0.5">
-                {visible.map((event) => (
-                  <button
-                    key={event.id}
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onOpenEvent(dateStr, event.id);
-                    }}
-                    className="flex items-center gap-1 truncate rounded px-1 py-0.5 text-left text-[11px] text-neutral-700 hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-neutral-800"
-                  >
-                    {event.category && (
-                      <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${CATEGORY_DOT_CLASSES[event.category]}`} />
-                    )}
-                    {event.startTime && (
-                      <span className="shrink-0 text-neutral-400">{formatTimeLabelFromValue(event.startTime)}</span>
-                    )}
-                    <span className="truncate">{event.title}</span>
-                  </button>
-                ))}
+                {visible.map((event) => {
+                  const color = event.category ? categoryColors[event.category] : null;
+                  return (
+                    <button
+                      key={event.id}
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onOpenEvent(dateStr, event.id);
+                      }}
+                      style={color ? { backgroundColor: `${color}1a` } : undefined}
+                      className="flex items-center gap-1 truncate rounded px-1 py-0.5 text-left text-[11px] text-neutral-700 hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-neutral-800"
+                    >
+                      {color && <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: color }} />}
+                      {event.startTime && (
+                        <span className="shrink-0 text-neutral-400">{formatTimeLabelFromValue(event.startTime)}</span>
+                      )}
+                      <span className="truncate">{event.title}</span>
+                    </button>
+                  );
+                })}
                 {hiddenCount > 0 && (
                   <button
                     type="button"

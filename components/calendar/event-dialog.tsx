@@ -14,6 +14,8 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { createEvent, updateEvent, deleteEvent } from "@/lib/actions/events";
 import { createLocation } from "@/lib/actions/locations";
+import { EventLinkPreview } from "./event-link-preview";
+import { extractFirstUrl } from "@/lib/calendar/link-preview";
 import { searchAddress, type GeocodeResult } from "@/lib/actions/geocode";
 import { CATEGORY_LABELS, CATEGORY_OPTIONS } from "./category";
 import type { EventCategory, EventItem, LocationOption } from "./types";
@@ -27,9 +29,20 @@ type Draft = {
   notes: string;
   category: EventCategory | "";
   locationId: string;
+  cost: string;
+  reservationUrl: string;
 };
 
-const EMPTY_DRAFT: Draft = { title: "", startTime: "", endTime: "", notes: "", category: "", locationId: "" };
+const EMPTY_DRAFT: Draft = {
+  title: "",
+  startTime: "",
+  endTime: "",
+  notes: "",
+  category: "",
+  locationId: "",
+  cost: "",
+  reservationUrl: "",
+};
 
 export function EventDialog({
   open,
@@ -42,6 +55,7 @@ export function EventDialog({
   prefill,
   onOptimisticCreate,
   onCreateSettled,
+  onOptimisticDelete,
   onSaved,
 }: {
   open: boolean;
@@ -58,6 +72,8 @@ export function EventDialog({
   onOptimisticCreate: (date: string | null, tempEvent: EventItem) => void;
   /** Swaps the temporary id for the real one once the write resolves. */
   onCreateSettled: (date: string | null, tempId: string, realId: string) => void;
+  /** Removes an event from the board immediately, before its delete write even starts. */
+  onOptimisticDelete: (date: string | null, eventId: string) => void;
   onSaved: () => void;
 }) {
   const [draft, setDraft] = useState<Draft>(EMPTY_DRAFT);
@@ -65,7 +81,9 @@ export function EventDialog({
   const [addressResults, setAddressResults] = useState<GeocodeResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [newLocationName, setNewLocationName] = useState("");
-  const [newLocationCoords, setNewLocationCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [newLocationCoords, setNewLocationCoords] = useState<{ lat: number; lng: number; city: string | null } | null>(
+    null
+  );
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
@@ -85,6 +103,8 @@ export function EventDialog({
             notes: event.notes ?? "",
             category: event.category ?? "",
             locationId: event.locationId ?? "",
+            cost: event.cost ?? "",
+            reservationUrl: event.reservationUrl ?? "",
           }
         : prefill
           ? { ...EMPTY_DRAFT, startTime: prefill.startTime, endTime: prefill.endTime }
@@ -114,6 +134,7 @@ export function EventDialog({
       name: newLocationName,
       lat: newLocationCoords!.lat,
       lng: newLocationCoords!.lng,
+      city: newLocationCoords!.city,
     });
     return created.id;
   }
@@ -153,6 +174,11 @@ export function EventDialog({
         category: draft.category || null,
         locationId: draft.locationId === NEW_LOCATION ? null : draft.locationId || null,
         locationName: optimisticLocationName,
+        // Not known client-side until the write settles and the page
+        // refreshes — the temporary card just shows no city in the meantime.
+        city: null,
+        cost: draft.cost.trim() || null,
+        reservationUrl: draft.reservationUrl.trim() || null,
       });
       onOpenChange(false);
 
@@ -166,6 +192,8 @@ export function EventDialog({
             notes: draft.notes,
             category: draft.category || null,
             locationId,
+            cost: draft.cost,
+            reservationUrl: draft.reservationUrl,
             date,
           });
           onCreateSettled(date, tempId, created.id);
@@ -190,6 +218,8 @@ export function EventDialog({
           notes: draft.notes,
           category: draft.category || null,
           locationId,
+          cost: draft.cost,
+          reservationUrl: draft.reservationUrl,
         });
         onOpenChange(false);
         onSaved();
@@ -202,13 +232,20 @@ export function EventDialog({
   function handleDelete() {
     if (!event) return;
     setError(null);
+
+    // Remove it from the board and close immediately — same as creating a
+    // new event, we assume the delete succeeds rather than making the user
+    // wait on the round trip.
+    onOptimisticDelete(date, event.id);
+    onOpenChange(false);
+
     startTransition(async () => {
       try {
         await deleteEvent(event.id);
-        onOpenChange(false);
-        onSaved();
       } catch (e) {
-        setError(e instanceof Error ? e.message : "Something went wrong");
+        console.error("Failed to delete event (UI had already closed, assuming success):", e);
+      } finally {
+        onSaved();
       }
     });
   }
@@ -280,6 +317,33 @@ export function EventDialog({
           </div>
 
           <div className="flex flex-col gap-1.5">
+            <Label htmlFor="event-cost">Cost (optional)</Label>
+            <Input
+              id="event-cost"
+              type="number"
+              inputMode="decimal"
+              min="0"
+              step="0.01"
+              value={draft.cost}
+              disabled={!canEdit}
+              onChange={(e) => setDraft((d) => ({ ...d, cost: e.target.value }))}
+              placeholder="0.00"
+            />
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="event-reservation">Reservation link (optional)</Label>
+            <Input
+              id="event-reservation"
+              type="url"
+              value={draft.reservationUrl}
+              disabled={!canEdit}
+              onChange={(e) => setDraft((d) => ({ ...d, reservationUrl: e.target.value }))}
+              placeholder="https://booking-confirmation-link.example.com"
+            />
+          </div>
+
+          <div className="flex flex-col gap-1.5">
             <Label htmlFor="event-location">Location</Label>
             <select
               id="event-location"
@@ -324,7 +388,7 @@ export function EventDialog({
                       <button
                         type="button"
                         onClick={() => {
-                          setNewLocationCoords({ lat: result.lat, lng: result.lng });
+                          setNewLocationCoords({ lat: result.lat, lng: result.lng, city: result.city });
                           setNewLocationName(result.label);
                           setAddressResults([]);
                           setAddressQuery(result.label);
@@ -363,6 +427,10 @@ export function EventDialog({
               rows={3}
             />
           </div>
+
+          {event && (
+            <EventLinkPreview url={event.reservationUrl ?? (event.notes ? extractFirstUrl(event.notes) : null)} />
+          )}
 
           {error && <p className="text-sm text-red-600">{error}</p>}
         </div>

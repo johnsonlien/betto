@@ -22,7 +22,29 @@ type EventInput = {
   notes?: string;
   category?: EventCategory | null;
   locationId?: string | null;
+  cost?: string | null;
+  reservationUrl?: string | null;
 };
+
+function parseReservationUrl(url: string | null | undefined): string | null {
+  const trimmed = url?.trim();
+  if (!trimmed) return null;
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") throw new Error();
+  } catch {
+    throw new Error("Reservation link must be a valid http(s) URL");
+  }
+  return trimmed;
+}
+
+function parseCost(cost: string | null | undefined): string | null {
+  const trimmed = cost?.trim();
+  if (!trimmed) return null;
+  const value = Number(trimmed);
+  if (!Number.isFinite(value) || value < 0) throw new Error("Cost must be a positive number");
+  return trimmed;
+}
 
 /** date omitted/null creates an unscheduled "idea pool" event — never timed. */
 export async function createEvent(calendarId: string, input: EventInput & { date?: string | null }) {
@@ -45,6 +67,8 @@ export async function createEvent(calendarId: string, input: EventInput & { date
       endTime: date && input.endTime ? combineDateAndTime(input.date!, input.endTime) : null,
       category: input.category || null,
       locationId: input.locationId || null,
+      cost: parseCost(input.cost),
+      reservationUrl: parseReservationUrl(input.reservationUrl),
     },
     select: { id: true },
   });
@@ -71,6 +95,8 @@ export async function updateEvent(eventId: string, input: EventInput) {
       endTime: dateStr && input.endTime ? combineDateAndTime(dateStr, input.endTime) : null,
       category: input.category || null,
       locationId: input.locationId || null,
+      cost: parseCost(input.cost),
+      reservationUrl: parseReservationUrl(input.reservationUrl),
     },
   });
 }
@@ -79,6 +105,12 @@ export async function deleteEvent(eventId: string) {
   const event = await prisma.event.findUniqueOrThrow({ where: { id: eventId } });
   await requireEditAccess(event.calendarId);
   await prisma.event.delete({ where: { id: eventId } });
+}
+
+/** Removes every event on the calendar (scheduled and pool alike). Owner/editor only. */
+export async function deleteAllEvents(calendarId: string) {
+  await requireEditAccess(calendarId);
+  await prisma.event.deleteMany({ where: { calendarId } });
 }
 
 /**

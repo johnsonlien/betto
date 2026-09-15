@@ -62,8 +62,19 @@ async function getDevSession() {
   };
 }
 
+// auth() is called multiple times per request (e.g. once in a server action,
+// again when the page re-renders after it) and the dev bypass otherwise
+// upserts the dev user on every single one of those calls — memoize the
+// promise for the life of the dev server process instead of hitting the DB
+// each time. Storing the in-flight promise (not just the resolved value)
+// also collapses concurrent calls onto a single upsert.
+let devSessionPromise: ReturnType<typeof getDevSession> | null = null;
+
 export async function auth() {
-  if (DEV_BYPASS) return getDevSession();
+  if (DEV_BYPASS) {
+    if (!devSessionPromise) devSessionPromise = getDevSession();
+    return devSessionPromise;
+  }
   return authWithSession();
 }
 

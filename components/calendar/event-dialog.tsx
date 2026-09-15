@@ -40,6 +40,8 @@ export function EventDialog({
   canEdit,
   locationOptions,
   prefill,
+  onOptimisticCreate,
+  onCreateSettled,
   onSaved,
 }: {
   open: boolean;
@@ -52,6 +54,10 @@ export function EventDialog({
   locationOptions: LocationOption[];
   /** Prefills start/end time when creating a new event (e.g. from a grid time-range selection). */
   prefill?: { startTime: string; endTime: string } | null;
+  /** Renders a new event immediately, under a temporary id, before its write even starts. */
+  onOptimisticCreate: (date: string | null, tempEvent: EventItem) => void;
+  /** Swaps the temporary id for the real one once the write resolves. */
+  onCreateSettled: (date: string | null, tempId: string, realId: string) => void;
   onSaved: () => void;
 }) {
   const [draft, setDraft] = useState<Draft>(EMPTY_DRAFT);
@@ -101,39 +107,90 @@ export function EventDialog({
     }
   }
 
+  /** Resolves the location to attach, creating a new pin first if one was picked from the search results. */
+  async function resolveLocationId(): Promise<string | null> {
+    if (draft.locationId !== NEW_LOCATION) return draft.locationId || null;
+    const created = await createLocation(calendarId, {
+      name: newLocationName,
+      lat: newLocationCoords!.lat,
+      lng: newLocationCoords!.lng,
+    });
+    return created.id;
+  }
+
   function handleSave() {
     setError(null);
+
+    if (draft.locationId === NEW_LOCATION && (!newLocationName.trim() || !newLocationCoords)) {
+      setError("Search for an address and pick a result first");
+      return;
+    }
+
+    if (!event) {
+      // New events: show the event on the board immediately under a
+      // temporary id and close the dialog, rather than waiting on the
+      // round trip to Postgres — we assume the create succeeds instead of
+      // blocking the UI on it. The temporary id is swapped for the real one
+      // once the background write resolves.
+      const title = draft.title.trim();
+      if (!title) {
+        setError("Title is required");
+        return;
+      }
+
+      const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+      const optimisticLocationName =
+        draft.locationId === NEW_LOCATION
+          ? newLocationName
+          : (locationOptions.find((l) => l.id === draft.locationId)?.name ?? null);
+
+      onOptimisticCreate(date, {
+        id: tempId,
+        title,
+        notes: draft.notes.trim() || null,
+        startTime: isPoolItem ? null : draft.startTime || null,
+        endTime: isPoolItem ? null : draft.endTime || null,
+        category: draft.category || null,
+        locationId: draft.locationId === NEW_LOCATION ? null : draft.locationId || null,
+        locationName: optimisticLocationName,
+      });
+      onOpenChange(false);
+
+      startTransition(async () => {
+        try {
+          const locationId = await resolveLocationId();
+          const created = await createEvent(calendarId, {
+            title,
+            startTime: isPoolItem ? undefined : draft.startTime,
+            endTime: isPoolItem ? undefined : draft.endTime,
+            notes: draft.notes,
+            category: draft.category || null,
+            locationId,
+            date,
+          });
+          onCreateSettled(date, tempId, created.id);
+        } catch (e) {
+          console.error("Failed to create event (UI had already closed, assuming success):", e);
+        } finally {
+          onSaved();
+        }
+      });
+      return;
+    }
+
+    // Editing an existing event still waits for the write so a failure
+    // surfaces in the dialog before it closes.
     startTransition(async () => {
       try {
-        let locationId: string | null = draft.locationId || null;
-
-        if (draft.locationId === NEW_LOCATION) {
-          if (!newLocationName.trim() || !newLocationCoords) {
-            setError("Search for an address and pick a result first");
-            return;
-          }
-          const created = await createLocation(calendarId, {
-            name: newLocationName,
-            lat: newLocationCoords.lat,
-            lng: newLocationCoords.lng,
-          });
-          locationId = created.id;
-        }
-
-        const payload = {
+        const locationId = await resolveLocationId();
+        await updateEvent(event.id, {
           title: draft.title,
           startTime: isPoolItem ? undefined : draft.startTime,
           endTime: isPoolItem ? undefined : draft.endTime,
           notes: draft.notes,
           category: draft.category || null,
           locationId,
-        };
-
-        if (event) {
-          await updateEvent(event.id, payload);
-        } else {
-          await createEvent(calendarId, { ...payload, date });
-        }
+        });
         onOpenChange(false);
         onSaved();
       } catch (e) {

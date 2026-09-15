@@ -144,6 +144,21 @@ export function CalendarBoard({
     setDialogOpen(true);
   }
 
+  /** Shows a newly created event immediately, before its write to Postgres has even started. */
+  function handleOptimisticCreate(targetDate: string | null, tempEvent: EventItem) {
+    const key = targetDate ?? POOL_KEY;
+    setColumns((prev) => ({ ...prev, [key]: [...(prev[key] ?? []), tempEvent] }));
+  }
+
+  /** Swaps the optimistic event's temporary id for its real one once the write resolves. */
+  function handleCreateSettled(targetDate: string | null, tempId: string, realId: string) {
+    const key = targetDate ?? POOL_KEY;
+    setColumns((prev) => ({
+      ...prev,
+      [key]: (prev[key] ?? []).map((e) => (e.id === tempId ? { ...e, id: realId } : e)),
+    }));
+  }
+
   function dayIndex(date: string) {
     return days.findIndex((d) => d.date === date);
   }
@@ -520,6 +535,8 @@ export function CalendarBoard({
         canEdit={canEdit}
         locationOptions={locationOptions}
         prefill={dialogState.prefill}
+        onOptimisticCreate={handleOptimisticCreate}
+        onCreateSettled={handleCreateSettled}
         onSaved={() => router.refresh()}
       />
     </div>

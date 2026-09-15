@@ -34,7 +34,7 @@ export async function createEvent(calendarId: string, input: EventInput & { date
   const date = input.date ? parseDateOnly(input.date) : null;
   const position = await nextPosition(calendarId, date);
 
-  await prisma.event.create({
+  const created = await prisma.event.create({
     data: {
       calendarId,
       title,
@@ -46,7 +46,10 @@ export async function createEvent(calendarId: string, input: EventInput & { date
       category: input.category || null,
       locationId: input.locationId || null,
     },
+    select: { id: true },
   });
+
+  return created;
 }
 
 export async function updateEvent(eventId: string, input: EventInput) {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition, type ReactNode } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -21,11 +21,21 @@ import { DayColumn } from "./day-column";
 import { EventCard } from "./event-card";
 import { EventDialog } from "./event-dialog";
 import { HoursAxis } from "./hours-axis";
+import { MonthView } from "./month-view";
 import { PoolPanel } from "./pool-panel";
 import { Button } from "@/components/ui/button";
 import { CollaboratorAvatars, type Person } from "@/components/collaborator-avatars";
 import { moveEvent, moveToGridSlot, moveToPool } from "@/lib/actions/events";
 import { HOUR_HEIGHT, timeToMinutes, minutesToTimeValue, snapMinutes } from "@/lib/calendar/time-grid";
+import {
+  addMonths,
+  formatDateOnly,
+  formatDayRangeLabel,
+  formatFullDateLabel,
+  formatMonthLabel,
+  parseDateOnly,
+  startOfMonth,
+} from "@/lib/dates";
 import type { DayColumnData, EventItem, LocationOption, MapLocation } from "./types";
 
 // MapLibre needs the browser and is only used on pages that pass mapLocations —
@@ -76,7 +86,18 @@ export type BoardHeader = {
   calendarTitle: string;
   dateRangeLabel: string;
   people: Person[];
+  /** Person-icon "who's in this calendar" / invite / share-link dialog trigger, rendered server-side. */
+  shareDialog?: ReactNode;
 };
+
+type ViewMode = "board" | "day" | "week" | "month";
+
+const VIEW_OPTIONS: { key: ViewMode; label: string }[] = [
+  { key: "day", label: "Day" },
+  { key: "week", label: "Week" },
+  { key: "month", label: "Month" },
+  { key: "board", label: "Board" },
+];
 
 export function CalendarBoard({
   calendarId,
@@ -157,6 +178,39 @@ export function CalendarBoard({
     return rows;
   }, [days]);
   const isSingleDay = days.length === 1;
+
+  const [view, setView] = useState<ViewMode>("board");
+  // These default to the trip's first day/week/month (not "today") so the
+  // server-rendered HTML and the client's first render match exactly — the
+  // server and a viewer's browser can disagree on the current date (different
+  // clocks/timezones), which would otherwise be a hydration mismatch. Once
+  // mounted, the effect below nudges each to "today" client-side if it falls
+  // within the trip.
+  const [dayCursorIndex, setDayCursorIndex] = useState(0);
+  const [weekIndex, setWeekIndex] = useState(0);
+  const [monthCursor, setMonthCursor] = useState(() =>
+    days[0] ? startOfMonth(parseDateOnly(days[0].date)) : new Date(0)
+  );
+
+  useEffect(() => {
+    const todayStr = formatDateOnly(new Date());
+
+    const todayDayIdx = days.findIndex((d) => d.date === todayStr);
+    if (todayDayIdx >= 0) setDayCursorIndex(todayDayIdx);
+
+    const todayWeekIdx = dayRows.findIndex((row) => row.some((d) => d.date === todayStr));
+    if (todayWeekIdx >= 0) setWeekIndex(todayWeekIdx);
+
+    if (days.some((d) => d.date === todayStr)) setMonthCursor(startOfMonth(parseDateOnly(todayStr)));
+    // Trip data is static for the life of the page — this only needs to run once, on mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const inRangeDates = useMemo(() => new Set(days.filter((d) => d.inRange).map((d) => d.date)), [days]);
+  const activeDay = days[dayCursorIndex];
+  const activeWeek = dayRows[weekIndex];
+  const visibleDayRows =
+    view === "day" && activeDay ? [[activeDay]] : view === "week" ? dayRows.slice(weekIndex, weekIndex + 1) : dayRows;
 
   const visibleLocations = useMemo(() => {
     if (!mapLocations) return undefined;
@@ -284,11 +338,100 @@ export function CalendarBoard({
             <h1 className="text-xl font-medium text-neutral-900 dark:text-neutral-100">{header.dateRangeLabel}</h1>
           </div>
           <div className="flex items-center gap-3">
-            <Button type="button" variant="outline" size="sm" onClick={() => setShowPool((s) => !s)}>
-              {showPool ? "Hide" : "Show"} idea pool{poolEvents.length > 0 ? ` (${poolEvents.length})` : ""}
-            </Button>
+            {view !== "month" && (
+              <Button type="button" variant="outline" size="sm" onClick={() => setShowPool((s) => !s)}>
+                {showPool ? "Hide" : "Show"} idea pool{poolEvents.length > 0 ? ` (${poolEvents.length})` : ""}
+              </Button>
+            )}
+            {header.shareDialog}
             <CollaboratorAvatars people={header.people} />
           </div>
+        </div>
+      )}
+
+      {header && (
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="inline-flex rounded-md border border-neutral-200 p-0.5 dark:border-neutral-800">
+            {VIEW_OPTIONS.map((v) => (
+              <button
+                key={v.key}
+                type="button"
+                onClick={() => setView(v.key)}
+                className={`rounded px-2.5 py-1 text-xs font-medium transition-colors ${
+                  view === v.key
+                    ? "bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900"
+                    : "text-neutral-500 hover:text-neutral-800 dark:text-neutral-400 dark:hover:text-neutral-200"
+                }`}
+              >
+                {v.label}
+              </button>
+            ))}
+          </div>
+
+          {view === "day" && activeDay && (
+            <div className="flex items-center gap-2 text-sm">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={dayCursorIndex === 0}
+                onClick={() => setDayCursorIndex((i) => Math.max(0, i - 1))}
+              >
+                Previous
+              </Button>
+              <span className="text-neutral-500">{formatFullDateLabel(parseDateOnly(activeDay.date))}</span>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={dayCursorIndex >= days.length - 1}
+                onClick={() => setDayCursorIndex((i) => Math.min(days.length - 1, i + 1))}
+              >
+                Next
+              </Button>
+            </div>
+          )}
+
+          {view === "week" && activeWeek && dayRows.length > 1 && (
+            <div className="flex items-center gap-2 text-sm">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={weekIndex === 0}
+                onClick={() => setWeekIndex((i) => Math.max(0, i - 1))}
+              >
+                Previous
+              </Button>
+              <span className="text-neutral-500">
+                {formatDayRangeLabel(
+                  parseDateOnly(activeWeek[0].date),
+                  parseDateOnly(activeWeek[activeWeek.length - 1].date)
+                )}
+              </span>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={weekIndex >= dayRows.length - 1}
+                onClick={() => setWeekIndex((i) => Math.min(dayRows.length - 1, i + 1))}
+              >
+                Next
+              </Button>
+            </div>
+          )}
+
+          {view === "month" && (
+            <div className="flex items-center gap-2 text-sm">
+              <Button type="button" variant="outline" size="sm" onClick={() => setMonthCursor((m) => addMonths(m, -1))}>
+                Previous
+              </Button>
+              <span className="text-neutral-500">{formatMonthLabel(monthCursor)}</span>
+              <Button type="button" variant="outline" size="sm" onClick={() => setMonthCursor((m) => addMonths(m, 1))}>
+                Next
+              </Button>
+            </div>
+          )}
         </div>
       )}
 
@@ -298,7 +441,7 @@ export function CalendarBoard({
         onDragStart={handleDragStart}
         onDragEnd={handleDragEnd}
       >
-        {header && showPool && (
+        {header && showPool && view !== "month" && (
           <PoolPanel
             events={poolEvents}
             canEdit={canEdit}
@@ -311,33 +454,48 @@ export function CalendarBoard({
         )}
 
         <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
-          <div className="flex min-w-0 flex-1 flex-col gap-4">
-            {dayRows.map((row, rowIndex) => (
-              <div key={rowIndex} className="flex gap-2">
-                {!isSingleDay && <HoursAxis />}
-                <div className="flex min-w-0 flex-1 gap-4 overflow-x-auto pb-2">
-                  {row.map((day) => (
-                    <DayColumn
-                      key={day.date}
-                      day={day}
-                      events={columns[day.date] ?? []}
-                      canEdit={canEdit}
-                      selected={selectedDates.has(day.date)}
-                      wide={isSingleDay}
-                      onHeaderClick={handleHeaderClick}
-                      onHeaderPointerDown={handleHeaderPointerDown}
-                      onHeaderPointerEnter={handleHeaderPointerEnter}
-                      onOpenEvent={(eventId) => {
-                        const ev = (columns[day.date] ?? []).find((e) => e.id === eventId) ?? null;
-                        openDialog(day.date, ev);
-                      }}
-                      onCreateInRange={(startTime, endTime) => openDialog(day.date, null, { startTime, endTime })}
-                    />
-                  ))}
+          {view === "month" ? (
+            <MonthView
+              month={monthCursor}
+              columns={columns}
+              inRangeDates={inRangeDates}
+              canEdit={canEdit}
+              onOpenEvent={(date, eventId) => {
+                const ev = (columns[date] ?? []).find((e) => e.id === eventId) ?? null;
+                openDialog(date, ev);
+              }}
+              onDayClick={handleHeaderClick}
+              onAddEvent={(date) => openDialog(date, null)}
+            />
+          ) : (
+            <div className="flex min-w-0 flex-1 flex-col gap-4">
+              {visibleDayRows.map((row, rowIndex) => (
+                <div key={rowIndex} className="flex gap-2">
+                  {!isSingleDay && <HoursAxis />}
+                  <div className="flex min-w-0 flex-1 gap-4 overflow-x-auto pb-2">
+                    {row.map((day) => (
+                      <DayColumn
+                        key={day.date}
+                        day={day}
+                        events={columns[day.date] ?? []}
+                        canEdit={canEdit}
+                        selected={selectedDates.has(day.date)}
+                        wide={isSingleDay || view === "day"}
+                        onHeaderClick={handleHeaderClick}
+                        onHeaderPointerDown={handleHeaderPointerDown}
+                        onHeaderPointerEnter={handleHeaderPointerEnter}
+                        onOpenEvent={(eventId) => {
+                          const ev = (columns[day.date] ?? []).find((e) => e.id === eventId) ?? null;
+                          openDialog(day.date, ev);
+                        }}
+                        onCreateInRange={(startTime, endTime) => openDialog(day.date, null, { startTime, endTime })}
+                      />
+                    ))}
+                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
 
           {visibleLocations && <LocationsPanel locations={visibleLocations} />}
         </div>

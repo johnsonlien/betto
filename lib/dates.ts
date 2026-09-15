@@ -47,6 +47,24 @@ export function startOfWeek(date: Date): Date {
   return addDays(date, -date.getUTCDay());
 }
 
+export function startOfMonth(date: Date): Date {
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1));
+}
+
+export function addMonths(date: Date, months: number): Date {
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + months, 1));
+}
+
+export function formatMonthLabel(date: Date): string {
+  return new Intl.DateTimeFormat("en-US", { month: "long", year: "numeric", timeZone: "UTC" }).format(date);
+}
+
+export function formatDayRangeLabel(start: Date, end: Date): string {
+  const formatter = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+  const yearFormatter = new Intl.DateTimeFormat("en-US", { year: "numeric", timeZone: "UTC" });
+  return `${formatter.format(start)} – ${formatter.format(end)}, ${yearFormatter.format(end)}`;
+}
+
 export function formatDayLabel(date: Date): string {
   return new Intl.DateTimeFormat("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" }).format(
     date

@@ -436,6 +436,12 @@ export function CalendarBoard({
       )}
 
       <DndContext
+        // Without an explicit id, dnd-kit derives its aria-describedby id
+        // from a module-level counter that keeps climbing across client-side
+        // remounts (Fast Refresh, navigating between boards) but always
+        // restarts at 0 on the server — server and client then disagree on
+        // first hydration. A stable id sidesteps the counter entirely.
+        id="calendar-board-dnd"
         sensors={sensors}
         collisionDetection={closestCorners}
         onDragStart={handleDragStart}

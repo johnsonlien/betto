@@ -24,5 +24,5 @@ export async function createCalendar(formData: FormData) {
     },
   });
 
-  redirect(`/calendars/${calendar.id}`);
+  redirect(`/calendars/${calendar.id}/board`);
 }

@@ -39,7 +39,7 @@ export async function createCalendarInvite(calendarId: string, formData: FormDat
     invitedByName: session.user.name ?? session.user.email ?? null,
   });
 
-  revalidatePath(`/calendars/${calendarId}`);
+  revalidatePath(`/calendars/${calendarId}/board`);
 }
 
 export async function revokeCalendarInvite(inviteId: string) {
@@ -51,5 +51,5 @@ export async function revokeCalendarInvite(inviteId: string) {
   if (access.role !== "OWNER") throw new Error("Only the calendar owner can revoke invites");
 
   await prisma.calendarInvite.update({ where: { id: inviteId }, data: { status: "REVOKED" } });
-  revalidatePath(`/calendars/${invite.calendarId}`);
+  revalidatePath(`/calendars/${invite.calendarId}/board`);
 }

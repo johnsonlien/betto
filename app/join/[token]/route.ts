@@ -16,7 +16,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
   }
 
   if (link.role === "VIEWER") {
-    const res = NextResponse.redirect(to(`/calendars/${link.calendarId}`));
+    const res = NextResponse.redirect(to(`/calendars/${link.calendarId}/board`));
     res.cookies.set(viewCookieName(link.calendarId), link.token, {
       httpOnly: true,
       sameSite: "lax",
@@ -40,5 +40,5 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
     create: { calendarId: link.calendarId, userId: session.user.id, role: "EDITOR" },
   });
 
-  return NextResponse.redirect(to(`/calendars/${link.calendarId}`));
+  return NextResponse.redirect(to(`/calendars/${link.calendarId}/board`));
 }

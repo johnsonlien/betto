@@ -25,7 +25,7 @@ export async function regenerateShareLink(calendarId: string, role: "EDITOR" | "
     });
   });
 
-  revalidatePath(`/calendars/${calendarId}`);
+  revalidatePath(`/calendars/${calendarId}/board`);
 }
 
 export async function revokeShareLink(shareLinkId: string) {
@@ -37,5 +37,5 @@ export async function revokeShareLink(shareLinkId: string) {
   if (access.role !== "OWNER") throw new Error("Only the calendar owner can revoke share links");
 
   await prisma.calendarShareLink.update({ where: { id: shareLinkId }, data: { revokedAt: new Date() } });
-  revalidatePath(`/calendars/${link.calendarId}`);
+  revalidatePath(`/calendars/${link.calendarId}/board`);
 }

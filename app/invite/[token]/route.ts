@@ -25,7 +25,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
     if (invite.status === "PENDING") {
       await prisma.calendarInvite.update({ where: { id: invite.id }, data: { status: "ACCEPTED" } });
     }
-    const res = NextResponse.redirect(to(`/calendars/${invite.calendarId}`));
+    const res = NextResponse.redirect(to(`/calendars/${invite.calendarId}/board`));
     res.cookies.set(viewCookieName(invite.calendarId), invite.token, {
       httpOnly: true,
       sameSite: "lax",
@@ -59,5 +59,5 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ toke
     await prisma.calendarInvite.update({ where: { id: invite.id }, data: { status: "ACCEPTED" } });
   }
 
-  return NextResponse.redirect(to(`/calendars/${invite.calendarId}`));
+  return NextResponse.redirect(to(`/calendars/${invite.calendarId}/board`));
 }

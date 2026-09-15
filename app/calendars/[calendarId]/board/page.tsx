@@ -1,8 +1,10 @@
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
-import { getCalendarAccess, canEdit as canEditAccess } from "@/lib/permissions";
+import { getCalendarAccess, canEdit as canEditAccess, isOwner as isOwnerAccess } from "@/lib/permissions";
 import { formatDateOnly, formatTimeInputValue, addDays, formatDayLabel, startOfWeek } from "@/lib/dates";
+import { appUrl } from "@/lib/url";
 import { CalendarBoard } from "@/components/calendar/calendar-board";
+import { ShareDialog, type SharePendingInvite } from "@/components/calendar/share-dialog";
 import type { DayColumnData, EventItem, MapLocation } from "@/components/calendar/types";
 
 const dateRangeFormatter = new Intl.DateTimeFormat("en-US", {
@@ -54,7 +56,9 @@ export default async function CalendarBoardPage({
     );
   }
 
-  const [events, poolEventRows, locations, owner, collaborators] = await Promise.all([
+  const owningUser = isOwnerAccess(access);
+
+  const [events, poolEventRows, locations, owner, collaborators, pendingInvites, shareLinks] = await Promise.all([
     prisma.event.findMany({
       where: { calendarId, date: { gte: calendar.startDate, lte: calendar.endDate } },
       orderBy: [{ date: "asc" }, { position: "asc" }],
@@ -74,6 +78,12 @@ export default async function CalendarBoardPage({
       where: { calendarId },
       include: { user: { select: { id: true, name: true, email: true } } },
     }),
+    owningUser
+      ? prisma.calendarInvite.findMany({ where: { calendarId, status: "PENDING" }, orderBy: { createdAt: "desc" } })
+      : Promise.resolve([]),
+    owningUser
+      ? prisma.calendarShareLink.findMany({ where: { calendarId, revokedAt: null } })
+      : Promise.resolve([]),
   ]);
 
   // Align to full Sunday–Saturday weeks so each row is a real calendar week,
@@ -111,6 +121,19 @@ export default async function CalendarBoardPage({
 
   const people = owner ? [owner, ...collaborators.map((c) => c.user)] : collaborators.map((c) => c.user);
 
+  const sharePeople = [
+    ...(owner ? [{ id: owner.id, role: "OWNER" as const, name: owner.name, email: owner.email }] : []),
+    ...collaborators.map((c) => ({ id: c.user.id, role: c.role, name: c.user.name, email: c.user.email })),
+  ];
+  const sharePendingInvites: SharePendingInvite[] = pendingInvites.map((invite) => ({
+    id: invite.id,
+    email: invite.email,
+    role: invite.role as "EDITOR" | "VIEWER",
+  }));
+  const shareLinkByRole = Object.fromEntries(shareLinks.map((link) => [link.role, link]));
+  const toLinkInfo = (link?: { id: string; token: string }) =>
+    link ? { id: link.id, url: appUrl(`/join/${link.token}`) } : null;
+
   return (
     <main className="mx-auto flex max-w-none flex-col gap-6 px-6 py-10">
       <CalendarBoard
@@ -123,10 +146,20 @@ export default async function CalendarBoardPage({
         mapLocations={mapLocations}
         poolEvents={poolEvents}
         header={{
-          backHref: `/calendars/${calendarId}`,
+          backHref: "/",
           calendarTitle: calendar.title,
           dateRangeLabel: `${dateRangeFormatter.format(calendar.startDate)} – ${dateRangeFormatter.format(calendar.endDate)}`,
           people,
+          shareDialog: (
+            <ShareDialog
+              calendarId={calendarId}
+              isOwner={owningUser}
+              people={sharePeople}
+              pendingInvites={sharePendingInvites}
+              viewLink={toLinkInfo(shareLinkByRole.VIEWER)}
+              editLink={toLinkInfo(shareLinkByRole.EDITOR)}
+            />
+          ),
         }}
       />
     </main>

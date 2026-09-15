@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { auth } from "@/auth";
 import { createCalendar } from "@/lib/actions/calendars";
 import { Button } from "@/components/ui/button";
@@ -22,7 +23,12 @@ export default async function NewCalendarPage() {
 
   return (
     <main className="mx-auto flex max-w-md flex-col gap-6 px-6 py-16">
-      <h1 className="text-2xl font-medium text-neutral-900 dark:text-neutral-100">Start a calendar</h1>
+      <div className="flex flex-col gap-1">
+        <Link href="/" className="text-sm text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200">
+          &larr; Your calendars
+        </Link>
+        <h1 className="text-2xl font-medium text-neutral-900 dark:text-neutral-100">Start a calendar</h1>
+      </div>
       <form action={createCalendar} className="flex flex-col gap-4">
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="title">Title</Label>
@@ -38,7 +44,12 @@ export default async function NewCalendarPage() {
             <Input id="endDate" name="endDate" type="date" required />
           </div>
         </div>
-        <Button type="submit">Create calendar</Button>
+        <div className="flex items-center gap-3">
+          <Button type="submit">Create calendar</Button>
+          <Button variant="outline" nativeButton={false} render={<a href="/" />}>
+            Cancel
+          </Button>
+        </div>
       </form>
     </main>
   );
